@@ -14,7 +14,6 @@
 <canvas id="c"></canvas>
 <script>
 const canvas = document.getElementById('c');
-const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
 
 let W, H;
 function resize() {
@@ -24,11 +23,11 @@ function resize() {
 resize();
 window.addEventListener('resize', () => { resize(); initSim(); });
 
-// ── Simulation grid ──────────────────────────────────────────────────────────
-const N = 200;        // grid size
-const ITER = 12;      // pressure iterations
+// Mobile gets smaller grid for performance
+const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 800;
+const N = isMobile ? 100 : 180;
+const ITER = isMobile ? 8 : 12;
 const DT = 0.016;
-const DIFF = 0.0;
 const VISC = 0.0000001;
 const DECAY = 0.9985;
 
@@ -115,7 +114,6 @@ function advect(n, bnd, d, d0, u, v) {
 }
 
 function step() {
-  // velocity
   diffuse(N, 1, vx0, vx, VISC);
   diffuse(N, 2, vy0, vy, VISC);
   project(N, vx0, vy0, vx, vy);
@@ -123,86 +121,106 @@ function step() {
   advect(N, 2, vy, vy0, vx0, vy0);
   project(N, vx, vy, vx0, vy0);
 
-  // density
-  diffuse(N, 0, r0, r, DIFF); diffuse(N, 0, g0, g, DIFF); diffuse(N, 0, b0, b, DIFF);
+  diffuse(N, 0, r0, r, 0); diffuse(N, 0, g0, g, 0); diffuse(N, 0, b0, b, 0);
   advect(N, 0, r, r0, vx, vy); advect(N, 0, g, g0, vx, vy); advect(N, 0, b, b0, vx, vy);
 
-  // fade
   for (let i = 0; i < r.length; i++) {
     r[i] *= DECAY; g[i] *= DECAY; b[i] *= DECAY;
   }
 }
 
-// ── WebGL rendering ──────────────────────────────────────────────────────────
-function createShader(type, src) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  return s;
+// ── Renderer: try WebGL, fallback to Canvas 2D ───────────────────────────────
+let useWebGL = false;
+let gl, prog, posLoc, uvLoc, vbuf, tex;
+const pixels = new Uint8Array((N + 2) * (N + 2) * 4);
+let ctx2d, imgData;
+
+function tryInitWebGL() {
+  gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (!gl) return false;
+
+  const VS = `
+    attribute vec2 a_pos;
+    attribute vec2 a_uv;
+    varying vec2 v_uv;
+    void main() { gl_Position = vec4(a_pos, 0, 1); v_uv = a_uv; }
+  `;
+  const FS = `
+    precision mediump float;
+    uniform sampler2D u_tex;
+    varying vec2 v_uv;
+    void main() {
+      vec3 c = texture2D(u_tex, v_uv).rgb;
+      c = c * 2.0;
+      c = c / (c + 0.5);
+      gl_FragColor = vec4(c, 1.0);
+    }
+  `;
+
+  function makeShader(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) return null;
+    return s;
+  }
+
+  const vs = makeShader(gl.VERTEX_SHADER, VS);
+  const fs = makeShader(gl.FRAGMENT_SHADER, FS);
+  if (!vs || !fs) return false;
+
+  prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return false;
+
+  posLoc = gl.getAttribLocation(prog, 'a_pos');
+  uvLoc  = gl.getAttribLocation(prog, 'a_uv');
+
+  vbuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1,-1, 0,1,
+     1,-1, 1,1,
+    -1, 1, 0,0,
+     1, 1, 1,0,
+  ]), gl.STATIC_DRAW);
+
+  tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  return true;
 }
 
-function createProgram(vs, fs) {
-  const p = gl.createProgram();
-  gl.attachShader(p, createShader(gl.VERTEX_SHADER, vs));
-  gl.attachShader(p, createShader(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(p);
-  return p;
+function initCanvas2D() {
+  ctx2d = canvas.getContext('2d');
+  imgData = ctx2d.createImageData(N + 2, N + 2);
+  // set alpha channel to 255 once
+  for (let i = 3; i < imgData.data.length; i += 4) imgData.data[i] = 255;
 }
 
-const VS = `
-attribute vec2 a_pos;
-attribute vec2 a_uv;
-varying vec2 v_uv;
-void main() { gl_Position = vec4(a_pos, 0, 1); v_uv = a_uv; }
-`;
+useWebGL = tryInitWebGL();
+if (!useWebGL) initCanvas2D();
 
-const FS = `
-precision mediump float;
-uniform sampler2D u_tex;
-varying vec2 v_uv;
-void main() {
-  vec3 c = texture2D(u_tex, v_uv).rgb;
-  // tone map + bloom-ish boost
-  c = c * 2.0;
-  c = c / (c + 0.5);
-  gl_FragColor = vec4(c, 1.0);
-}
-`;
-
-const prog = createProgram(VS, FS);
-const posLoc = gl.getAttribLocation(prog, 'a_pos');
-const uvLoc  = gl.getAttribLocation(prog, 'a_uv');
-
-const vbuf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1,-1, 0,1,
-   1,-1, 1,1,
-  -1, 1, 0,0,
-   1, 1, 1,0,
-]), gl.STATIC_DRAW);
-
-const tex = gl.createTexture();
-gl.bindTexture(gl.TEXTURE_2D, tex);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-const pixels = new Uint8Array((N + 2) * (N + 2) * 3);
-
-function updateTexture() {
+function renderWebGL() {
   const sz = (N + 2) * (N + 2);
   for (let i = 0; i < sz; i++) {
-    pixels[i*3]   = Math.min(255, r[i] * 255);
-    pixels[i*3+1] = Math.min(255, g[i] * 255);
-    pixels[i*3+2] = Math.min(255, b[i] * 255);
+    const rv = Math.min(1, r[i] * 2) / (Math.min(1, r[i] * 2) + 0.5);
+    const gv = Math.min(1, g[i] * 2) / (Math.min(1, g[i] * 2) + 0.5);
+    const bv = Math.min(1, b[i] * 2) / (Math.min(1, b[i] * 2) + 0.5);
+    pixels[i*4]   = rv * 255;
+    pixels[i*4+1] = gv * 255;
+    pixels[i*4+2] = bv * 255;
+    pixels[i*4+3] = 255;
   }
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, N+2, N+2, 0, gl.RGB, gl.UNSIGNED_BYTE, pixels);
-}
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N+2, N+2, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-function render() {
   gl.viewport(0, 0, W, H);
   gl.useProgram(prog);
   gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
@@ -214,11 +232,26 @@ function render() {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// ── Input ────────────────────────────────────────────────────────────────────
+function renderCanvas2D() {
+  const sz = (N + 2) * (N + 2);
+  const d = imgData.data;
+  for (let i = 0; i < sz; i++) {
+    const rv = Math.min(255, r[i] * 2 * 255);
+    const gv = Math.min(255, g[i] * 2 * 255);
+    const bv = Math.min(255, b[i] * 2 * 255);
+    d[i*4]   = rv;
+    d[i*4+1] = gv;
+    d[i*4+2] = bv;
+  }
+  ctx2d.putImageData(imgData, 0, 0);
+  // scale up to fill screen
+  ctx2d.drawImage(canvas, 0, 0, N+2, N+2, 0, 0, W, H);
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
 let hue = 0;
 
 function inject(cx, cy, fx, fy) {
-  // map canvas coords → grid coords
   const gx = Math.round(cx / W * N);
   const gy = Math.round(cy / H * N);
 
@@ -233,9 +266,9 @@ function inject(cx, cy, fx, fy) {
       const id = idx(x, y);
       vx[id] += fx * 0.4;
       vy[id] += fy * 0.4;
-      r[id]  += cr * 0.6;
-      g[id]  += cg * 0.6;
-      b[id]  += cb * 0.6;
+      r[id]  += cr * 0.8;
+      g[id]  += cg * 0.8;
+      b[id]  += cb * 0.8;
     }
   }
 }
@@ -269,7 +302,11 @@ canvas.addEventListener('mousemove', e => {
 const touches = new Map();
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
-  for (const t of e.changedTouches) touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+  for (const t of e.changedTouches) {
+    touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+    // inject a small burst on touch start so tap is visible
+    inject(t.clientX, t.clientY, 1, 1);
+  }
 }, { passive: false });
 canvas.addEventListener('touchend', e => {
   for (const t of e.changedTouches) touches.delete(t.identifier);
@@ -280,16 +317,16 @@ canvas.addEventListener('touchmove', e => {
     const prev = touches.get(t.identifier);
     if (!prev) continue;
     const dx = t.clientX - prev.x, dy = t.clientY - prev.y;
-    inject(t.clientX, t.clientY, dx, dy);
+    inject(t.clientX, t.clientY, dx * 3, dy * 3);
     touches.set(t.identifier, { x: t.clientX, y: t.clientY });
   }
 }, { passive: false });
 
-// ── Loop ─────────────────────────────────────────────────────────────────────
+// ── Loop ──────────────────────────────────────────────────────────────────────
 function loop() {
   step();
-  updateTexture();
-  render();
+  if (useWebGL) renderWebGL();
+  else renderCanvas2D();
   requestAnimationFrame(loop);
 }
 loop();
