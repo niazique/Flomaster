@@ -13,7 +13,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v3</div>
+<div id="ver">v4</div>
 <script>
 const canvas = document.getElementById('c');
 
@@ -27,16 +27,18 @@ window.addEventListener('resize', () => { resize(); initSim(); });
 
 // Mobile gets smaller grid for performance
 const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 800;
-const N = isMobile ? 140 : 280;
-const ITER = isMobile ? 10 : 14;
+const N = isMobile ? 140 : 320;
+const ITER = isMobile ? 10 : 16;
 const DT = 0.016;
 const VISC = 0.0000001;
+const VORTICITY = 4.0;
 
 // Background colour (dark purple) in 0-1 range
 const BG_R = 13/255, BG_G = 0, BG_B = 32/255;
 
 let vx, vy, vx0, vy0;
 let r, g, b, r0, g0, b0;
+let curl;
 
 function idx(x, y) { return x + (N + 2) * y; }
 
@@ -47,6 +49,7 @@ function initSim() {
   r   = new Float32Array(sz); g   = new Float32Array(sz); b = new Float32Array(sz);
   r0  = new Float32Array(sz); g0  = new Float32Array(sz); b0 = new Float32Array(sz);
   r.fill(BG_R); b.fill(BG_B); // g stays 0 (= BG_G)
+  curl = new Float32Array(sz);
 }
 initSim();
 
@@ -99,6 +102,27 @@ function project(n, vx, vy, p, div) {
   setBnd(n, 1, vx); setBnd(n, 2, vy);
 }
 
+function vorticityConfinement(n) {
+  // Compute curl (z-component of vorticity)
+  for (let j = 1; j <= n; j++) {
+    for (let i = 1; i <= n; i++) {
+      curl[idx(i,j)] = 0.5 * ((vy[idx(i+1,j)] - vy[idx(i-1,j)]) - (vx[idx(i,j+1)] - vx[idx(i,j-1)]));
+    }
+  }
+  // Apply confinement force to restore fine-scale vortices
+  const h = 1.0 / n;
+  for (let j = 1; j <= n; j++) {
+    for (let i = 1; i <= n; i++) {
+      const dOmega_dx = 0.5 * (Math.abs(curl[idx(i+1,j)]) - Math.abs(curl[idx(i-1,j)]));
+      const dOmega_dy = 0.5 * (Math.abs(curl[idx(i,j+1)]) - Math.abs(curl[idx(i,j-1)]));
+      const len = Math.sqrt(dOmega_dx*dOmega_dx + dOmega_dy*dOmega_dy) + 1e-5;
+      const omega = curl[idx(i,j)];
+      vx[idx(i,j)] += VORTICITY * h * (dOmega_dy / len) * omega;
+      vy[idx(i,j)] -= VORTICITY * h * (dOmega_dx / len) * omega;
+    }
+  }
+}
+
 function advect(n, bnd, d, d0, u, v) {
   const dt0 = DT * n;
   for (let j = 1; j <= n; j++) {
@@ -125,6 +149,7 @@ function step() {
   advect(N, 1, vx, vx0, vx0, vy0);
   advect(N, 2, vy, vy0, vx0, vy0);
   project(N, vx, vy, vx0, vy0);
+  vorticityConfinement(N);
 
   diffuse(N, 0, r0, r, 0); diffuse(N, 0, g0, g, 0); diffuse(N, 0, b0, b, 0);
   advect(N, 0, r, r0, vx, vy); advect(N, 0, g, g0, vx, vy); advect(N, 0, b, b0, vx, vy);
