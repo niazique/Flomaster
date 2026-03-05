@@ -13,7 +13,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v1</div>
+<div id="ver">v2</div>
 <script>
 const canvas = document.getElementById('c');
 
@@ -252,17 +252,17 @@ function inject(cx, cy, fx, fy) {
   const gx = Math.round(cx / W * N);
   const gy = Math.round(cy / H * N);
 
-  const radius = 3;
+  const radius = 1;
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
       const x = gx + dx, y = gy + dy;
       if (x < 1 || x > N || y < 1 || y > N) continue;
       const id = idx(x, y);
-      vx[id] += fx * 0.4;
-      vy[id] += fy * 0.4;
+      vx[id] += fx * 0.3;
+      vy[id] += fy * 0.3;
       // Always inject cyan (голубой): R=0, G=0.65, B=1.0
-      g[id]  += 0.45;
-      b[id]  += 0.65;
+      g[id]  += 0.18;
+      b[id]  += 0.26;
     }
   }
 }
@@ -285,7 +285,7 @@ canvas.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
     touches.set(t.identifier, { x: t.clientX, y: t.clientY });
     // inject a small burst on touch start so tap is visible
-    inject(t.clientX, t.clientY, 1, 1);
+    inject(t.clientX, t.clientY, 0.3, 0.3);
   }
 }, { passive: false });
 canvas.addEventListener('touchend', e => {
