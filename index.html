@@ -12,12 +12,19 @@
     #controls { position: fixed; bottom: 16px; left: 16px; display: flex; flex-direction: column; gap: 8px; }
     #controls label { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,0.5); font: 13px/1 monospace; }
     #controls input[type=range] { width: 160px; height: 6px; accent-color: rgba(255,255,255,0.6); cursor: pointer; }
+    #mode-toggle { display: flex; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; overflow: hidden; }
+    #mode-toggle span { padding: 5px 14px; font: 12px/1 monospace; color: rgba(255,255,255,0.3); cursor: pointer; user-select: none; transition: background 0.15s, color 0.15s; }
+    #mode-toggle span.active { background: rgba(255,255,255,0.13); color: rgba(255,255,255,0.75); }
   </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v7</div>
+<div id="ver">v8</div>
 <div id="controls">
+  <div id="mode-toggle">
+    <span id="mt-bg" class="active">фон</span>
+    <span id="mt-trail">разводы</span>
+  </div>
   <label>H <input type="range" id="sl-h" min="0" max="255" value="191"></label>
   <label>S <input type="range" id="sl-s" min="0" max="255" value="255"></label>
   <label>L <input type="range" id="sl-l" min="0" max="255" value="15"></label>
@@ -43,6 +50,15 @@ const VORTICITY = 4.0;
 
 // Background colour — updated by sliders
 let BG_R = 13/255, BG_G = 0, BG_B = 32/255;
+// Trail injection colour (cyan default: hsl≈195°,100%,30% scaled by 0.3)
+let TRAIL_R = 0, TRAIL_G = 0.12, TRAIL_B = 0.18;
+
+// Slider mode and saved positions per mode
+let sliderMode = 'bg';
+const sliderState = {
+  bg:    { h: 191, s: 255, l: 15 },
+  trail: { h: 138, s: 255, l: 76 }
+};
 
 function hslToRgb01(h, s, l) {
   s /= 100; l /= 100;
@@ -51,20 +67,38 @@ function hslToRgb01(h, s, l) {
   return [f(0), f(8), f(4)];
 }
 
-function updateBG() {
+function updateSliders() {
   const h = +document.getElementById('sl-h').value / 255 * 360;
   const s = +document.getElementById('sl-s').value / 255 * 100;
   const l = +document.getElementById('sl-l').value / 255 * 100;
-  const [newR, newG, newB] = hslToRgb01(h, s, l);
-  const dR = newR - BG_R, dG = newG - BG_G, dB = newB - BG_B;
-  BG_R = newR; BG_G = newG; BG_B = newB;
-  // Shift entire pixel buffer instantly so background changes without waiting for fade
-  for (let i = 0; i < r.length; i++) { r[i] += dR; g[i] += dG; b[i] += dB; }
-  const hex = [BG_R, BG_G, BG_B].map(v => Math.round(v*255).toString(16).padStart(2,'0')).join('');
-  document.body.style.background = '#' + hex;
+  if (sliderMode === 'bg') {
+    const [newR, newG, newB] = hslToRgb01(h, s, l);
+    const dR = newR - BG_R, dG = newG - BG_G, dB = newB - BG_B;
+    BG_R = newR; BG_G = newG; BG_B = newB;
+    for (let i = 0; i < r.length; i++) { r[i] += dR; g[i] += dG; b[i] += dB; }
+    const hex = [BG_R, BG_G, BG_B].map(v => Math.round(v*255).toString(16).padStart(2,'0')).join('');
+    document.body.style.background = '#' + hex;
+  } else {
+    const [cr, cg, cb] = hslToRgb01(h, s, l);
+    TRAIL_R = cr * 0.3; TRAIL_G = cg * 0.3; TRAIL_B = cb * 0.3;
+  }
 }
 
-['sl-h','sl-s','sl-l'].forEach(id => document.getElementById(id).addEventListener('input', updateBG));
+function setMode(m) {
+  sliderState[sliderMode].h = +document.getElementById('sl-h').value;
+  sliderState[sliderMode].s = +document.getElementById('sl-s').value;
+  sliderState[sliderMode].l = +document.getElementById('sl-l').value;
+  sliderMode = m;
+  document.getElementById('sl-h').value = sliderState[m].h;
+  document.getElementById('sl-s').value = sliderState[m].s;
+  document.getElementById('sl-l').value = sliderState[m].l;
+  document.getElementById('mt-bg').classList.toggle('active', m === 'bg');
+  document.getElementById('mt-trail').classList.toggle('active', m === 'trail');
+}
+
+document.getElementById('mt-bg').addEventListener('click', () => setMode('bg'));
+document.getElementById('mt-trail').addEventListener('click', () => setMode('trail'));
+['sl-h','sl-s','sl-l'].forEach(id => document.getElementById(id).addEventListener('input', updateSliders));
 
 let vx, vy, vx0, vy0;
 let r, g, b, r0, g0, b0;
@@ -78,7 +112,7 @@ function initSim() {
   vx0 = new Float32Array(sz); vy0 = new Float32Array(sz);
   r   = new Float32Array(sz); g   = new Float32Array(sz); b = new Float32Array(sz);
   r0  = new Float32Array(sz); g0  = new Float32Array(sz); b0 = new Float32Array(sz);
-  r.fill(BG_R); b.fill(BG_B); // g stays 0 (= BG_G)
+  r.fill(BG_R); g.fill(BG_G); b.fill(BG_B);
   curl = new Float32Array(sz);
 }
 initSim();
@@ -315,9 +349,7 @@ function inject(cx, cy, fx, fy) {
       const id = idx(x, y);
       vx[id] += fx * 0.15;
       vy[id] += fy * 0.15;
-      // Inject cyan, slightly dimmer
-      g[id]  += 0.12;
-      b[id]  += 0.18;
+      r[id] += TRAIL_R; g[id] += TRAIL_G; b[id] += TRAIL_B;
     }
   }
 }
