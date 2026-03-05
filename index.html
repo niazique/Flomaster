@@ -6,7 +6,7 @@
   <title>Flomaster</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #000; overflow: hidden; }
+    body { background: #0d0020; overflow: hidden; }
     canvas { display: block; touch-action: none; }
   </style>
 </head>
@@ -29,7 +29,9 @@ const N = isMobile ? 100 : 180;
 const ITER = isMobile ? 8 : 12;
 const DT = 0.016;
 const VISC = 0.0000001;
-const DECAY = 0.9985;
+
+// Background colour (dark purple) in 0-1 range
+const BG_R = 13/255, BG_G = 0, BG_B = 32/255;
 
 let vx, vy, vx0, vy0;
 let r, g, b, r0, g0, b0;
@@ -42,6 +44,7 @@ function initSim() {
   vx0 = new Float32Array(sz); vy0 = new Float32Array(sz);
   r   = new Float32Array(sz); g   = new Float32Array(sz); b = new Float32Array(sz);
   r0  = new Float32Array(sz); g0  = new Float32Array(sz); b0 = new Float32Array(sz);
+  r.fill(BG_R); b.fill(BG_B); // g stays 0 (= BG_G)
 }
 initSim();
 
@@ -125,7 +128,10 @@ function step() {
   advect(N, 0, r, r0, vx, vy); advect(N, 0, g, g0, vx, vy); advect(N, 0, b, b0, vx, vy);
 
   for (let i = 0; i < r.length; i++) {
-    r[i] *= DECAY; g[i] *= DECAY; b[i] *= DECAY;
+    // Green fades fastest (cyan→blue), blue slower (blue→purple), red drifts to bg
+    r[i] = r[i] * 0.9992 + BG_R * 0.0008;
+    g[i] = g[i] * 0.991  + BG_G * 0.009;
+    b[i] = b[i] * 0.9972 + BG_B * 0.0028;
   }
 }
 
@@ -150,10 +156,7 @@ function tryInitWebGL() {
     uniform sampler2D u_tex;
     varying vec2 v_uv;
     void main() {
-      vec3 c = texture2D(u_tex, v_uv).rgb;
-      c = c * 2.0;
-      c = c / (c + 0.5);
-      gl_FragColor = vec4(c, 1.0);
+      gl_FragColor = vec4(texture2D(u_tex, v_uv).rgb, 1.0);
     }
   `;
 
@@ -210,12 +213,9 @@ if (!useWebGL) initCanvas2D();
 function renderWebGL() {
   const sz = (N + 2) * (N + 2);
   for (let i = 0; i < sz; i++) {
-    const rv = Math.min(1, r[i] * 2) / (Math.min(1, r[i] * 2) + 0.5);
-    const gv = Math.min(1, g[i] * 2) / (Math.min(1, g[i] * 2) + 0.5);
-    const bv = Math.min(1, b[i] * 2) / (Math.min(1, b[i] * 2) + 0.5);
-    pixels[i*4]   = rv * 255;
-    pixels[i*4+1] = gv * 255;
-    pixels[i*4+2] = bv * 255;
+    pixels[i*4]   = Math.min(255, r[i] * 255) | 0;
+    pixels[i*4+1] = Math.min(255, g[i] * 255) | 0;
+    pixels[i*4+2] = Math.min(255, b[i] * 255) | 0;
     pixels[i*4+3] = 255;
   }
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -236,12 +236,9 @@ function renderCanvas2D() {
   const sz = (N + 2) * (N + 2);
   const d = imgData.data;
   for (let i = 0; i < sz; i++) {
-    const rv = Math.min(255, r[i] * 2 * 255);
-    const gv = Math.min(255, g[i] * 2 * 255);
-    const bv = Math.min(255, b[i] * 2 * 255);
-    d[i*4]   = rv;
-    d[i*4+1] = gv;
-    d[i*4+2] = bv;
+    d[i*4]   = Math.min(255, r[i] * 255) | 0;
+    d[i*4+1] = Math.min(255, g[i] * 255) | 0;
+    d[i*4+2] = Math.min(255, b[i] * 255) | 0;
   }
   ctx2d.putImageData(imgData, 0, 0);
   // scale up to fill screen
@@ -249,14 +246,9 @@ function renderCanvas2D() {
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
-let hue = 0;
-
 function inject(cx, cy, fx, fy) {
   const gx = Math.round(cx / W * N);
   const gy = Math.round(cy / H * N);
-
-  hue = (hue + 0.004) % 1;
-  const [cr, cg, cb] = hsvToRgb(hue, 1, 1);
 
   const radius = 3;
   for (let dy = -radius; dy <= radius; dy++) {
@@ -266,24 +258,10 @@ function inject(cx, cy, fx, fy) {
       const id = idx(x, y);
       vx[id] += fx * 0.4;
       vy[id] += fy * 0.4;
-      r[id]  += cr * 0.8;
-      g[id]  += cg * 0.8;
-      b[id]  += cb * 0.8;
+      // Always inject cyan (голубой): R=0, G=0.65, B=1.0
+      g[id]  += 0.45;
+      b[id]  += 0.65;
     }
-  }
-}
-
-function hsvToRgb(h, s, v) {
-  const i = Math.floor(h * 6);
-  const f = h * 6 - i;
-  const p = v * (1 - s), q = v * (1 - f*s), t = v * (1 - (1-f)*s);
-  switch (i % 6) {
-    case 0: return [v, t, p];
-    case 1: return [q, v, p];
-    case 2: return [p, v, t];
-    case 3: return [p, q, v];
-    case 4: return [t, p, v];
-    case 5: return [v, p, q];
   }
 }
 
