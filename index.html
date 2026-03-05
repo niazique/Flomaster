@@ -13,7 +13,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v2</div>
+<div id="ver">v3</div>
 <script>
 const canvas = document.getElementById('c');
 
@@ -27,8 +27,8 @@ window.addEventListener('resize', () => { resize(); initSim(); });
 
 // Mobile gets smaller grid for performance
 const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 800;
-const N = isMobile ? 100 : 180;
-const ITER = isMobile ? 8 : 12;
+const N = isMobile ? 140 : 280;
+const ITER = isMobile ? 10 : 14;
 const DT = 0.016;
 const VISC = 0.0000001;
 
@@ -258,8 +258,8 @@ function inject(cx, cy, fx, fy) {
       const x = gx + dx, y = gy + dy;
       if (x < 1 || x > N || y < 1 || y > N) continue;
       const id = idx(x, y);
-      vx[id] += fx * 0.3;
-      vy[id] += fy * 0.3;
+      vx[id] += fx * 0.15;
+      vy[id] += fy * 0.15;
       // Always inject cyan (голубой): R=0, G=0.65, B=1.0
       g[id]  += 0.18;
       b[id]  += 0.26;
