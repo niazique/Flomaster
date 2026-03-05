@@ -19,7 +19,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v8</div>
+<div id="ver">v9</div>
 <div id="controls">
   <div id="mode-toggle">
     <span id="mt-bg" class="active">фон</span>
@@ -50,14 +50,14 @@ const VORTICITY = 4.0;
 
 // Background colour — updated by sliders
 let BG_R = 13/255, BG_G = 0, BG_B = 32/255;
-// Trail injection colour (cyan default: hsl≈195°,100%,30% scaled by 0.3)
-let TRAIL_R = 0, TRAIL_G = 0.12, TRAIL_B = 0.18;
+// Trail injection colour (cyan default: hsl≈195°,100%,50%)
+let TRAIL_R = 0, TRAIL_G = 0.75, TRAIL_B = 1.0;
 
 // Slider mode and saved positions per mode
 let sliderMode = 'bg';
 const sliderState = {
   bg:    { h: 191, s: 255, l: 15 },
-  trail: { h: 138, s: 255, l: 76 }
+  trail: { h: 138, s: 255, l: 128 }
 };
 
 function hslToRgb01(h, s, l) {
@@ -79,8 +79,7 @@ function updateSliders() {
     const hex = [BG_R, BG_G, BG_B].map(v => Math.round(v*255).toString(16).padStart(2,'0')).join('');
     document.body.style.background = '#' + hex;
   } else {
-    const [cr, cg, cb] = hslToRgb01(h, s, l);
-    TRAIL_R = cr * 0.3; TRAIL_G = cg * 0.3; TRAIL_B = cb * 0.3;
+    [TRAIL_R, TRAIL_G, TRAIL_B] = hslToRgb01(h, s, l);
   }
 }
 
@@ -349,7 +348,7 @@ function inject(cx, cy, fx, fy) {
       const id = idx(x, y);
       vx[id] += fx * 0.15;
       vy[id] += fy * 0.15;
-      r[id] += TRAIL_R; g[id] += TRAIL_G; b[id] += TRAIL_B;
+      r[id] = TRAIL_R; g[id] = TRAIL_G; b[id] = TRAIL_B;
     }
   }
 }
