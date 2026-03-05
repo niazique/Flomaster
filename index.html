@@ -16,7 +16,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v6</div>
+<div id="ver">v7</div>
 <div id="controls">
   <label>H <input type="range" id="sl-h" min="0" max="255" value="191"></label>
   <label>S <input type="range" id="sl-s" min="0" max="255" value="255"></label>
@@ -55,7 +55,11 @@ function updateBG() {
   const h = +document.getElementById('sl-h').value / 255 * 360;
   const s = +document.getElementById('sl-s').value / 255 * 100;
   const l = +document.getElementById('sl-l').value / 255 * 100;
-  [BG_R, BG_G, BG_B] = hslToRgb01(h, s, l);
+  const [newR, newG, newB] = hslToRgb01(h, s, l);
+  const dR = newR - BG_R, dG = newG - BG_G, dB = newB - BG_B;
+  BG_R = newR; BG_G = newG; BG_B = newB;
+  // Shift entire pixel buffer instantly so background changes without waiting for fade
+  for (let i = 0; i < r.length; i++) { r[i] += dR; g[i] += dG; b[i] += dB; }
   const hex = [BG_R, BG_G, BG_B].map(v => Math.round(v*255).toString(16).padStart(2,'0')).join('');
   document.body.style.background = '#' + hex;
 }
