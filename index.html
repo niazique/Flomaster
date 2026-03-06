@@ -19,7 +19,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ver">v9</div>
+<div id="ver">v10</div>
 <div id="controls">
   <div id="mode-toggle">
     <span id="mt-bg" class="active">фон</span>
@@ -102,6 +102,9 @@ document.getElementById('mt-trail').addEventListener('click', () => setMode('tra
 let vx, vy, vx0, vy0;
 let r, g, b, r0, g0, b0;
 let curl;
+let photoR, photoG, photoB; // target photo pixels (sim fades back to these)
+
+const PHOTO_URL = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=512&h=512&fit=crop';
 
 function idx(x, y) { return x + (N + 2) * y; }
 
@@ -111,10 +114,35 @@ function initSim() {
   vx0 = new Float32Array(sz); vy0 = new Float32Array(sz);
   r   = new Float32Array(sz); g   = new Float32Array(sz); b = new Float32Array(sz);
   r0  = new Float32Array(sz); g0  = new Float32Array(sz); b0 = new Float32Array(sz);
+  photoR = new Float32Array(sz); photoG = new Float32Array(sz); photoB = new Float32Array(sz);
   r.fill(BG_R); g.fill(BG_G); b.fill(BG_B);
+  photoR.fill(BG_R); photoG.fill(BG_G); photoB.fill(BG_B);
   curl = new Float32Array(sz);
 }
 initSim();
+
+function loadPhoto() {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    const oc = document.createElement('canvas');
+    oc.width = N + 2; oc.height = N + 2;
+    const octx = oc.getContext('2d');
+    octx.drawImage(img, 0, 0, N + 2, N + 2);
+    const data = octx.getImageData(0, 0, N + 2, N + 2).data;
+    const sz = (N + 2) * (N + 2);
+    for (let i = 0; i < sz; i++) {
+      photoR[i] = data[i*4]   / 255;
+      photoG[i] = data[i*4+1] / 255;
+      photoB[i] = data[i*4+2] / 255;
+      r[i] = photoR[i]; g[i] = photoG[i]; b[i] = photoB[i];
+    }
+    document.body.style.background = '';
+  };
+  img.onerror = () => console.warn('Photo failed to load, using solid BG');
+  img.src = PHOTO_URL;
+}
+loadPhoto();
 
 function setBnd(n, bnd, x) {
   for (let i = 1; i <= n; i++) {
@@ -218,10 +246,10 @@ function step() {
   advect(N, 0, r, r0, vx, vy); advect(N, 0, g, g0, vx, vy); advect(N, 0, b, b0, vx, vy);
 
   for (let i = 0; i < r.length; i++) {
-    // Green fades fastest (cyan→blue), blue slower (blue→purple), red drifts to bg
-    r[i] = r[i] * 0.9992 + BG_R * 0.0008;
-    g[i] = g[i] * 0.991  + BG_G * 0.009;
-    b[i] = b[i] * 0.9972 + BG_B * 0.0028;
+    // Fade back to photo (or BG if photo not loaded)
+    r[i] = r[i] * 0.9992 + photoR[i] * 0.0008;
+    g[i] = g[i] * 0.9988 + photoG[i] * 0.0012;
+    b[i] = b[i] * 0.999  + photoB[i] * 0.001;
   }
 }
 
